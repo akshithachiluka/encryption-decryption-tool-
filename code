@@ -1,0 +1,138 @@
+import tkinter as tk
+from tkinter import messagebox
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.backends import default_backend
+import os
+
+def generate_aes_key():
+    return os.urandom(32)
+
+def generate_chacha20_key():
+    return os.urandom(32)
+
+def generate_chacha20_nonce():
+    return os.urandom(16)
+
+def encrypt_message(key, message, algorithm):
+    if algorithm == "aes":
+        iv = os.urandom(16)
+        cipher = Cipher(algorithms.AES(key), modes.GCM(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        encryptor.authenticate_additional_data(b"authenticated but not encrypted data")
+        encrypted_message = encryptor.update(message.encode()) + encryptor.finalize()
+        encrypted_message = iv + encrypted_message + encryptor.tag
+    elif algorithm == "chacha20":
+        nonce = generate_chacha20_nonce()
+        cipher = Cipher(algorithms.ChaCha20(key, nonce), mode=None, backend=default_backend())
+        encryptor = cipher.encryptor()
+        encrypted_message = encryptor.update(message.encode()) + encryptor.finalize()
+        encrypted_message = nonce + encrypted_message
+    else:
+        raise ValueError("Invalid encryption algorithm")
+
+    return encrypted_message
+
+def decrypt_message(key, encrypted_message, algorithm):
+    if algorithm == "aes":
+        iv = encrypted_message[:16]
+        tag = encrypted_message[-16:]
+        encrypted_message = encrypted_message[16:-16]
+        cipher = Cipher(algorithms.AES(key), modes.GCM(iv, tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+        decryptor.authenticate_additional_data(b"authenticated but not encrypted data")
+        decrypted_message = decryptor.update(encrypted_message) + decryptor.finalize()
+        decrypted_message = decrypted_message.decode()
+    elif algorithm == "chacha20":
+        nonce = encrypted_message[:16]
+        encrypted_message = encrypted_message[16:]
+        cipher = Cipher(algorithms.ChaCha20(key, nonce), mode=None, backend=default_backend())
+        decryptor = cipher.decryptor()
+        decrypted_message = decryptor.update(encrypted_message) + decryptor.finalize()
+        decrypted_message = decrypted_message.decode()
+    else:
+        raise ValueError("Invalid encryption algorithm")
+
+    return decrypted_message
+
+encryption_key = None
+stored_data = {}
+
+def on_submit():
+    global encryption_key, stored_data
+
+    algorithm = algorithm_var.get()
+    message = message_entry.get()
+
+    if not message:
+        messagebox.showerror("Error", "Please enter a message to process.")
+        return
+
+    if mode_var.get() == "encrypt":
+        if algorithm == "aes":
+            encryption_key = generate_aes_key()
+        elif algorithm == "chacha20":
+            encryption_key = generate_chacha20_key()
+        else:
+            raise ValueError("Invalid encryption algorithm")
+
+        encrypted_message = encrypt_message(encryption_key, message, algorithm)
+        result_var.set(encrypted_message.hex())
+        status_label.config(text="Output: Encrypted")
+
+        stored_data[encrypted_message.hex()] = encryption_key.hex()
+
+    elif mode_var.get() == "decrypt":
+        if message in stored_data:
+            encryption_key = bytes.fromhex(stored_data[message])
+
+            try:
+                encrypted_message = bytes.fromhex(message)
+                decrypted_message = decrypt_message(encryption_key, encrypted_message, algorithm)
+                result_var.set(decrypted_message)
+                status_label.config(text="Output: Decrypted")
+            except Exception:
+                messagebox.showerror("Error", "Decryption failed. Check if the stored encryption key is correct.")
+                status_label.config(text="Output: Error")
+        else:
+            messagebox.showerror("Error", "Input not found in stored data.")
+            status_label.config(text="Output: Error")
+# Create the main GUI window
+root = tk.Tk()
+root.title("Encryption-Decryption Tool")
+
+
+algorithm_var = tk.StringVar(value="aes")
+
+mode_var = tk.StringVar(value="encrypt")
+
+message_label = tk.Label(root, text="Enter the message:")
+message_label.pack()
+message_entry = tk.Entry(root)
+message_entry.pack()
+
+algorithm_label = tk.Label(root, text="Select encryption algorithm:")
+algorithm_label.pack()
+algorithm_radio_a = tk.Radiobutton(root, text="AES", variable=algorithm_var, value="aes")
+algorithm_radio_a.pack()
+algorithm_radio_b = tk.Radiobutton(root, text="ChaCha20", variable=algorithm_var, value="chacha20")
+algorithm_radio_b.pack()
+
+
+encrypt_radio = tk.Radiobutton(root, text="Encrypt", variable=mode_var, value="encrypt")
+encrypt_radio.pack()
+decrypt_radio = tk.Radiobutton(root, text="Decrypt", variable=mode_var, value="decrypt")
+decrypt_radio.pack()
+
+default_message = "Output message."
+default_label = tk.Label(root, text=default_message)
+default_label.pack()
+result_var = tk.StringVar()
+result_label = tk.Label(root,textvariable=result_var)
+result_label.pack()
+status_label = tk.Label(root, text="Output: ")
+status_label.pack()
+submit_button = tk.Button(root, text="Submit", command=on_submit)
+submit_button.pack()
+
+root.mainloop()
